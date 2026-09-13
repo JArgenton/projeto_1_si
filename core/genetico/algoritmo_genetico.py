@@ -1,4 +1,3 @@
-import copy
 import math
 import random
 
@@ -14,6 +13,7 @@ class AG:
         taxa_crossover,
         max_execucoes,
         chance_mutacao,
+        tamanho_torneio,
     ):
         self.matriz_custo = matriz_custo
         self.n_cidades = n_cidades
@@ -21,6 +21,7 @@ class AG:
         self.taxa_crossover = taxa_crossover
         self.max_execucoes = max_execucoes
         self.chance_mutacao = chance_mutacao
+        self.tamanho_torneio = tamanho_torneio
 
         self.best = math.inf
         self.best_gen = None
@@ -47,6 +48,15 @@ class AG:
 
         return random.choices(individuos, weights=pesos, k=self.n_individuos)
 
+    def selecao_torneio(self, fitnesses: list) -> list:
+        candidatos = []
+        n_pop = len(self.individuos)
+        for _ in range(n_pop):
+            competidores_idx = random.sample(range(n_pop), self.tamanho_torneio)
+            vencedor_idx = min(competidores_idx, key=lambda i: fitnesses[i])
+            candidatos.append(self.individuos[vencedor_idx])
+        return candidatos
+
     def _selecionar_casais(self, candidatos: list) -> list[tuple]:
         pais = candidatos.copy()
         random.shuffle(pais)
@@ -69,49 +79,8 @@ class AG:
 
         return casais
 
-    def reproduzir_elitista(self) -> None:
-        fitnesses = [self.funcao_fitness(elem) for elem in self.individuos]
-        self._separar_melhor(fitnesses)
-
-        n_pop = len(self.individuos)
-        self.n_elite = max(int(n_pop * 0.10), 1)
-
-        indices_ordenados = sorted(range(n_pop), key=lambda i: fitnesses[i])
-
-        novos_individuos = [
-            self.individuos[i].copy() for i in indices_ordenados[: self.n_elite]
-        ]
-
-        candidatos = self.sortear_candidatos(self.individuos, fitnesses)
-        casais = self._selecionar_casais(candidatos)
-
-        for casal in casais:
-            if len(novos_individuos) >= n_pop:
-                break
-
-            ind1, ind2 = self.crossover(casal)
-            novos_individuos.append(ind1)
-
-            if len(novos_individuos) < n_pop:
-                novos_individuos.append(ind2)
-
-        self.individuos = novos_individuos
-
     def crossover(self, casal: tuple[list, list]) -> tuple[list, list]:
-        pai1, pai2 = casal[0], casal[1]
-
-        if random.random() > self.taxa_crossover:
-            return pai1.copy(), pai2.copy()
-
-        cidade_inicial = pai1[0]
-
-        # Isola os genes permutáveis omitindo apenas o índice 0
-        p1_inter = pai1[1:]
-        p2_inter = pai2[1:]
-        tamanho = len(p1_inter)
-        d1, d2 = sorted(random.sample(range(tamanho + 1), 2))
-
-        def _gerar_filho(p_doador: list, p_receptor: list) -> list:
+        def _gerar_filho_original(p_doador: list, p_receptor: list) -> list:
             filho = [None] * tamanho
             filho[d1:d2] = p_doador[d1:d2]
 
@@ -125,10 +94,36 @@ class AG:
 
             return [cidade_inicial] + filho
 
-        filho1 = _gerar_filho(p1_inter, p2_inter)
-        filho2 = _gerar_filho(p2_inter, p1_inter)
+        def _gerar_filho_set(p_doador: list, p_receptor: list) -> list:
+            filho = [None] * tamanho
+            filho[d1:d2] = p_doador[d1:d2]
+            genes_presentes = set(p_doador[d1:d2])
 
-        return filho1, filho2
+            pos = d2 % tamanho
+            ordem_receptor = p_receptor[d2:] + p_receptor[:d2]
+
+            for gene in ordem_receptor:
+                if gene not in genes_presentes:
+                    filho[pos] = gene
+                    genes_presentes.add(gene)
+                    pos = (pos + 1) % tamanho
+            return [cidade_inicial] + filho
+
+        pai1, pai2 = casal[0], casal[1]
+
+        if random.random() > self.taxa_crossover:
+            return pai1.copy(), pai2.copy()
+
+        cidade_inicial = pai1[0]
+
+        p1_inter = pai1[1:]
+        p2_inter = pai2[1:]
+        tamanho = len(p1_inter)
+        d1, d2 = sorted(random.sample(range(tamanho + 1), 2))
+
+        return _gerar_filho_set(p1_inter, p2_inter), _gerar_filho_set(
+            p2_inter, p1_inter
+        )
 
     def funcao_fitness(self, individuo: list):
         custo = 0
@@ -139,13 +134,15 @@ class AG:
             custo += self.matriz_custo[u][v]
         return custo
 
-    def _separar_melhor(self, fitnesses):
+    def _separar_melhor(self, fitnesses, geracao_atual=None):
         for i, fit in enumerate(fitnesses):
             if fit < self.best:
                 self.best = fit
-                self.best_gen = copy.deepcopy(self.individuos[i])
+                self.best_gen = self.individuos[i].copy()
+                if geracao_atual is not None:
+                    self.best_exc = geracao_atual
 
-    def mutate(self):
+    def mutate_original_swap(self):
         inicio_mutacao = getattr(self, "n_elite", 0)
 
         for idx in range(inicio_mutacao, len(self.individuos)):
@@ -160,10 +157,23 @@ class AG:
 
             self.individuos[idx] = individuo
 
-    def reproduzir(self) -> list:
+    def mutate_2_opt(self):
+        # no lugar de um swap, troca a ordem de um trexo no algoritmo; teoricamente destroi menos bons individuos
+        inicio_mutacao = getattr(self, "n_elite", 0)
+
+        for idx in range(inicio_mutacao, len(self.individuos)):
+            if random.random() < self.chance_mutacao:
+                individuo = self.individuos[idx]
+                idx1, idx2 = sorted(random.sample(range(1, self.n_cidades), 2))
+
+                individuo[idx1 : idx2 + 1] = reversed(individuo[idx1 : idx2 + 1])
+                self.individuos[idx] = individuo
+
+    def reproduzir_original(self, iteracao) -> list:
         fitnesses = [self.funcao_fitness(elem) for elem in self.individuos]
-        self._separar_melhor(fitnesses)
+        self._separar_melhor(fitnesses, iteracao)
         candidatos = self.sortear_candidatos(self.individuos, fitnesses)
+        # candidatos = self.selecao_torneio(fitnesses)
         casais = self._selecionar_casais(candidatos)
         novos_individuos = []
         for casal in casais:
@@ -173,10 +183,40 @@ class AG:
 
         self.individuos = novos_individuos
 
+    def reproduzir_elitista(self, iteracao) -> None:
+        fitnesses = [self.funcao_fitness(elem) for elem in self.individuos]
+        self._separar_melhor(fitnesses, iteracao)
+
+        n_pop = len(self.individuos)
+        self.n_elite = max(int(n_pop / 20), 1)
+
+        indices_ordenados = sorted(range(n_pop), key=lambda i: fitnesses[i])
+
+        novos_individuos = [
+            self.individuos[i].copy() for i in indices_ordenados[: self.n_elite]
+        ]
+
+        candidatos = self.sortear_candidatos(self.individuos, fitnesses)
+        # candidatos = self.selecao_torneio(fitnesses)
+        casais = self._selecionar_casais(candidatos)
+
+        for casal in casais:
+            if len(novos_individuos) >= n_pop:
+                break
+
+            ind1, ind2 = self.crossover(casal)
+            novos_individuos.append(ind1)
+
+            if len(novos_individuos) < n_pop:
+                novos_individuos.append(ind2)
+
+        self.individuos = novos_individuos
+
     def executar(self):
         self.populate()
-        for _ in range(self.max_execucoes):
-            self.reproduzir_elitista()
-            # self.reproduzir()
-            self.mutate()
-        return self.best, self.best_gen
+        self.best_exc = 0
+        for n in range(self.max_execucoes):
+            self.reproduzir_elitista(n)
+            # self.reproduzir(n)
+            self.mutate_2_opt()
+        return self.best, self.best_gen, self.best_exc

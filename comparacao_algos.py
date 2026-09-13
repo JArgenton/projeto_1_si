@@ -9,7 +9,7 @@ from core.uteis.uteis import (
 
 
 def comparar_algoritmos():
-    TAMANHO = 100
+    TAMANHO = 50
     # tempura
     TEMP_MIN = 0.001
     ACEITACAO = 0.90
@@ -17,10 +17,11 @@ def comparar_algoritmos():
     ESTABILIDADE_TERMICA = 1
 
     # AG
-    MAX_EXECUCOES_AG = 600
+    MAX_EXECUCOES_AG = 800
     P_FITNESS = 2.5
-    TAXA_CROSSOVER = 0.8
-    TAXA_MUTACAO = 1 / (20 * TAMANHO)
+    TAM_TORNEIO = 5
+    TAXA_CROSSOVER = 0.9
+    TAXA_MUTACAO = 1 / (5)
 
     MAX_EXECUCOES_FB = 100000
 
@@ -47,8 +48,9 @@ def comparar_algoritmos():
         TAXA_CROSSOVER,
         MAX_EXECUCOES_AG,
         TAXA_MUTACAO,
+        TAM_TORNEIO,
     )
-    custo_ag, sol_ag = ag.executar()
+    custo_ag, sol_ag, best_exc = ag.executar()
     tempo_ag = time.perf_counter() - inicio_ag
 
     inicio_fb = time.perf_counter()
@@ -95,6 +97,8 @@ def comparar_algoritmos():
     print("\nDetalhamento das Melhores Rotas Encontradas:")
     for res in resultados:
         print(f"-> {res['nome']}: {res['rota']}")
+
+    print(f"melhor execucao: {best_exc}")
 
 
 if __name__ == "__main__":
